@@ -1,0 +1,183 @@
+{
+  "Id": "ActionTemplates-41",
+  "Name": "Duo Auth Check",
+  "Description": "This script will prompt the user to perform a Duo authentication check.",
+  "ActionType": "Octopus.Script",
+  "Version": 24,
+  "Properties": {
+    "Octopus.Action.Script.Syntax": "PowerShell",
+    "Octopus.Action.Script.ScriptSource": "Inline",
+    "Octopus.Action.RunOnServer": "false",
+    "Octopus.Action.Script.ScriptBody": "<#\r\n\r\n    Last Modified Date: 04/13/2017\r\n\r\n    This is an example of an Octopus Deploy script that can be used to perform Duo Authentications as part of a Deployment\r\n    Process Step. Please note that this script was designed to run as part of an Octopus Deploy script template and therefore\r\n    requires a number of Octopus Deploy parameters be passed in to the script. The DuoAuthCheck.json file located in the same\r\n    directory is an example of an exported Octopus Deploy script template that uses this code. It is recommended you import the\r\n    DuoAuthCheck.json file into Octopus Deploy as a script template as the Octopus Deploy parameters will already be setup.\r\n\r\n    This requires that the project has the following required variables passed into the script template.\r\n\r\n        DuoApiHostname\r\n        DuoIntegrationKey\r\n        DuoSecretKey OR DuoSecretEncKey\r\n        DuoUsername\r\n\r\n    The following optional parameters can also be passed into the script template.\r\n\r\n        DuoPushType\r\n        DuoPushInfo\r\n        DuoDisplayUsername\r\n\r\n    The following optional proxy parameters can also be passed into the script template.\r\n\r\n        DuoProxyServer\r\n        DuoProxyPort\r\n        DuoProxyBypassList\r\n        DuoProxyBypassOnLocal\r\n        DuoProxyUseDefaultCredentials\r\n        DuoProxyUsername\r\n        DuoProxyPassword or DuoProxyPasswordEncrypted\r\n\r\n    NOTE: For those reviewing this file just to see an example of the Posh-DuoAPI module, you may want to skip past the\r\n          parameter checks and go straight to the \"Duo Authentication\" section below.\r\n\r\n#>\r\n\r\n# Check if we are running this from Octopus Deploy or testing with it manually.\r\n# NOTE: If testing manually, you will need to change the information below to the appropriate values.\r\nIf (-not ($OctopusParameters)) {\r\n    $OctopusParameters = @{\r\n        # Duo API Info.\r\n        DuoUsername = 'janedoe'\r\n        DuoApiHostname = 'api-nnnnnxnx.duosecurity.com'\r\n        DuoIntegrationKey = 'DIxxxxxxxxxxxxxxxxxx'\r\n        #DuoSecretKey = 'YourSecretsHere'\r\n        # --OR--\r\n        DuoSecretEncKey = 'Big long protected SecureString represented as a string on 1 line here'\r\n\r\n        # Optional parameters.\r\n        DuoPushType = 'Deployment Request'\r\n        DuoPushInfo = 'Project=Testing&Foo=Bar'\r\n        DuoDisplayUsername = 'Jane Doe'\r\n    }\r\n}\r\n\r\n# Get Octopus Deploy parameters. These are required.\r\nIf ($OctopusParameters['DuoApiHostname']) { $apiHost = $OctopusParameters['DuoApiHostname'] }\r\nElse { Throw 'Must provide a Duo API Hostname parameter.'}\r\n\r\nIf ($OctopusParameters['DuoIntegrationKey']) { $apiIntKey = $OctopusParameters['DuoIntegrationKey'] }\r\nElse { Throw 'Must provide a Duo API Integration Key parameter.'}\r\n\r\nIf ($OctopusParameters['DuoSecretKey']) { $apiSecretKey = $OctopusParameters['DuoSecretKey']; $secretKeyKeyname = 'SecretKey' }\r\nElseIf ($OctopusParameters['DuoSecretEncKey']) { $apiSecretKey = $OctopusParameters['DuoSecretEncKey']; $secretKeyKeyname = 'SecretKeyEncrypted' }\r\nElse { Throw 'Must provide either a Duo API Secret Key or a Duo API Secret Key Encrypted parameter.'}\r\n\r\n# Note: Some organizations require the domain suffix with the username (or full UPN). Others require just the username.\r\n#       Modify the line below to not split at the '@' sign if you need the full UPN.\r\nIf ($OctopusParameters['DuoUsername']) { $username = ($OctopusParameters['DuoUsername'] -split '@')[0] }\r\nElse { Throw 'Must provide a username.' }\r\n\r\n# These Octopus Deploy parameters are optional.\r\n$OptionalParams = @{}\r\nIf ($OctopusParameters['DuoPushType']) { $OptionalParams['PushType'] = $OctopusParameters['DuoPushType'] }\r\nIf ($OctopusParameters['DuoPushInfo']) { $OptionalParams['PushInfo'] = $OctopusParameters['DuoPushInfo'] }\r\nIf ($OctopusParameters['DuoDisplayUsername']) { $OptionalParams['DisplayUsername'] = $OctopusParameters['DuoDisplayUsername'] }\r\n\r\n# These Octopus Deploy parameters are optional.\r\n$ProxyParams = @{}\r\nIf ($OctopusParameters['DuoProxyServer']) { $ProxyParams['ProxyServer'] = $OctopusParameters['DuoProxyServer'] }\r\nIf ($OctopusParameters['DuoProxyPort']) { $ProxyParams['ProxyPort'] = $OctopusParameters['DuoProxyPort'] }\r\nIf ($OctopusParameters['DuoProxyBypassList']) { $ProxyParams['ProxyBypassList'] = $OctopusParameters['DuoProxyBypassList'] -split ',' }\r\nIf ($OctopusParameters['DuoProxyBypassOnLocal'] -eq 'True') { $ProxyParams['ProxyBypassOnLocal'] = $true }\r\nIf ($OctopusParameters['DuoProxyUseDefaultCredentials'] -eq 'True') { $ProxyParams['ProxyUseDefaultCredentials'] = $true }\r\nIf ($OctopusParameters['DuoProxyUsername']) { $ProxyParams['ProxyUsername'] = $OctopusParameters['DuoProxyUsername'] }\r\nIf ($OctopusParameters['DuoProxyPassword']) { $ProxyParams['ProxyPassword'] = $OctopusParameters['DuoProxyPassword'] }\r\nElseIf ($OctopusParameters['DuoProxyPasswordEncrypted']) { $ProxyParams['ProxyPasswordEncrypted'] = $OctopusParameters['DuoProxyPasswordEncrypted'] }\r\n\r\n# Verify the proxy parameters make sense.\r\n\r\n# If no proxy server exist then there should be no other proxy parameters given.\r\nIf (($ProxyParams['ProxyServer'] -eq $null) -and ($ProxyParams.Keys.Count -gt 0)) { Throw 'Cannont set proxy parameters if no proxy server is specified.' }\r\n\r\n# If proxy server does exist, check other proxy parameters for validity.\r\nIf ($ProxyParams['ProxyServer']) {\r\n\r\n    # If Proxy username is given then there must be a proxy password.\r\n    If (($ProxyParams['ProxyUsername']) -and ($ProxyParams['ProxyPassword'] -eq $null) -and ($ProxyParams['ProxyPasswordEncrypted'] -eq $null)) {\r\n        Throw 'A proxy password must be provided with the proxy username.'\r\n    }\r\n\r\n}\r\n\r\n# Output variable values for Octopus Deploy log.\r\nWrite-Output \"API Hostname : $apiHost\"\r\nWrite-Output \"API Integration Key : $apiIntKey\"\r\nWrite-Output 'API Secret Key : Secret key is not null'  # Obviously don't want to display this in the log.\r\nWrite-Output \"User : $username\"\r\nWrite-Output \"Optional Parameters : `n$($OptionalParams | Out-String)\"\r\nWrite-Output \"Proxy Parameters : `n$($ProxyParams.Clone() | Foreach-Object { $_.Remove('ProxyPassword'); $_.Remove('ProxyPasswordEncrypted'); $_ } | Out-String)\"\r\n\r\n######################\r\n# Duo Authentication #\r\n######################\r\n\r\n# Build required Duo API envrionment information table.\r\n$duoEnv = @{\r\n\r\n    Env = @{\r\n\r\n        ApiHostname = $apiHost\r\n        IntegrationKey = $apiIntKey\r\n        $secretKeyKeyname = $apiSecretKey\r\n\r\n    }\r\n\r\n}\r\n\r\n# Add proxy server parameters.\r\nForeach ($key In $ProxyParams.Keys) { $duoEnv['Env'].$key = $ProxyParams[$key] }\r\n\r\n# Is authentication successful?\r\n$AuthSuccess = $false\r\n\r\n# Import module.\r\nImport-Module Posh-DuoAPI -ArgumentList $duoEnv, 'Env'\r\n\r\n# Verify Duo API host is up and provided keys are valid.\r\nIf (-not (Test-DuoPing)) { Throw \"Duo API host is down : $apiHost\" }\r\nIf (-not (Test-DuoCheckKeys)) { Throw 'Provided keys do not appear to be valid.' }\r\n\r\n# Check if user is enrolled and can authenticate with Duo if needed.\r\nWrite-Output 'Performing pre-authentication and retrieving list of available devices...'\r\n$preAuth = Get-DuoPreAuth -Username $username\r\n\r\nIf (($preAuth.stat -eq 'OK') -and ($preAuth.response.result -eq 'auth')) {\r\n    $shouldAuth = $true\r\n} ElseIf (($preAuth.stat -eq 'OK') -and ($preAuth.response.result -eq 'allow')) {\r\n    $shouldAuth = $false\r\n    $AuthSuccess = $true  # User is allowed to bypass authentication.\r\n} ElseIf (($preAuth.stat -eq 'OK') -and (($preAuth.response.result -eq 'deny') -or ($preAuth.response.result -eq 'enroll'))) {\r\n    Throw $preAuth.response.status_msg\r\n} ElseIf ($preAuth.stat -eq 'FAIL') {\r\n    Throw ($preAuth.code + ' : ' + $preAuth.message + ' : ' + $preAuth.message_detail)\r\n}\r\n\r\n# Perform Duo authentication.\r\nIf ($shouldAuth) {\r\n\r\n    # Try to find a registered device that does not require a passcode to be entered.\r\n    # Basically, if it is a phone and has more than just mobile_otp as a possible method.\r\n    $deviceId = $null\r\n    Foreach ($dev In $preAuth.response.devices) {\r\n\r\n        # Get device id.\r\n        If ($dev.type -eq 'phone') {\r\n            If (($dev.capabilities.Contains('mobile_otp')) -and ($dev.capabilities.Count -gt 1)) { $deviceId = $dev.device }\r\n            ElseIf ((-not $dev.capabilities.Contains('mobile_otp')) -and ($dev.capabilities.Count -gt 0)) { $deviceId = $dev.device }\r\n        }\r\n\r\n        # Prompt user for authentication via their registered device.\r\n        If ($deviceId) {\r\n            Write-Output \"Perfomring authentication via device: $deviceId\"\r\n            $auth = Get-DuoAuth -Username $username -AuthFactorAuto -Device $deviceId @OptionalParams\r\n\r\n            If (($auth.stat -eq 'OK') -and ($auth.response.result -eq 'allow')) {\r\n                $AuthSuccess = $true\r\n            } ElseIf (($auth.stat -eq 'OK') -and ($auth.response.result -eq 'deny')) {\r\n                Throw $auth.response.status_msg\r\n            } ElseIf ($auth.stat -eq 'FAIL') {\r\n                Throw ($auth.code + ' : ' + $auth.message + ' : ' + $auth.message_detail)\r\n            }\r\n\r\n            # Only need to do this for one device so break out of the loop here.\r\n            Break\r\n\r\n        } Else {\r\n            Throw 'Error retrieving a registered device.'\r\n        }\r\n\r\n    }\r\n\r\n}\r\n\r\n# Is authentication successful?\r\n# If not we likely threw an error above but just in case let's check.\r\nIf ($AuthSuccess) {\r\n    Write-Output 'Authencation Successful.'\r\n} Else {\r\n    Throw 'Authentication Failed.'\r\n}",
+    "Octopus.Action.Script.ScriptFileName": null,
+    "Octopus.Action.Package.FeedId": null,
+    "Octopus.Action.Package.PackageId": null
+  },
+  "Parameters": [
+    {
+      "Id": "542707c8-f1af-4bf3-ab4a-89584d6f1781",
+      "Name": "DuoApiHostname",
+      "Label": "Duo API Hostname",
+      "HelpText": "This is the URL to your Duo API host that authentications will take place against.\n\nThis field is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "217aea2e-a9e1-41d0-bdbb-cac86f535d25",
+      "Name": "DuoIntegrationKey",
+      "Label": "Duo API Integration Key",
+      "HelpText": "The Duo API Integration Key that was provided by your Duo administrator for your application.\n\nThis field is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "3257f20f-089d-4800-ba1b-154a9b7d4a42",
+      "Name": "DuoSecretKey",
+      "Label": "Duo API Secret Key",
+      "HelpText": "The Duo API Secret Key associated with the Duo API Integration Key.\n\nA secret key or a secret key encrypted field is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Sensitive"
+      }
+    },
+    {
+      "Id": "b539c77d-6954-4eb7-8747-af1b69c8eace",
+      "Name": "DuoSecretEncKey",
+      "Label": "Duo API Secret Key Encrypted",
+      "HelpText": "A SecureString representation of the Duo API Secret Key associated with the Duo API Integration Key.\n\nA secret key or a secret key encrypted field is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Sensitive"
+      }
+    },
+    {
+      "Id": "dcd2b5a7-7326-4ef5-8c0c-8c500d31d29e",
+      "Name": "DuoUsername",
+      "Label": "Duo Username",
+      "HelpText": "The user that will receive the Duo authentication request via their registered device.\n\nThis field is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "6c7ffc1c-87d7-4df5-bd8e-5de8a9097777",
+      "Name": "DuoPushType",
+      "Label": "Duo Push Type",
+      "HelpText": "The title of the request when performing a Push authentication attempt. By default this is \"Login Request\" and will result in the title of the Push authentication attempt displaying \"Login Request\". Change this optional value to display a different type of request.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "c2eaa7d3-69d0-4204-b8fb-26c914e6272a",
+      "Name": "DuoPushInfo",
+      "Label": "Duo Push Info",
+      "HelpText": "Additional information to be provided when performing a Push authentication attempt. The information must be provided in a URL encoded format. Example below.\n\nEX: Project=Your%20Project%20Name&Foo=Bar",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "ed8b64de-7553-4b2c-b002-e0e585544148",
+      "Name": "DuoDisplayUsername",
+      "Label": "Duo Display Username",
+      "HelpText": "The username string to display when performing a Push authentication attempt.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "3a7c18ce-4f6c-4fac-91d8-a78eb51c4797",
+      "Name": "DuoProxyServer",
+      "Label": "Proxy Server",
+      "HelpText": "The hostname of the proxy server if one is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "2b0e29a8-f468-4309-a83a-37bd5826ba94",
+      "Name": "DuoProxyPort",
+      "Label": "Proxy Server Port",
+      "HelpText": "The port used to connect to the proxy server if one is required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "bca6e95d-882f-4b7d-8518-51a7a90974fc",
+      "Name": "DuoProxyBypassList",
+      "Label": "Proxy Bypass List",
+      "HelpText": "A comma separated list of hostname/domains that will not use the proxy server.\n\nEX: *.domain.local,*.otherdomain.local",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "eefe3381-d501-4057-a9cb-72458fa58eef",
+      "Name": "DuoProxyBypassOnLocal",
+      "Label": "Proxy Bypass On Local",
+      "HelpText": "If checked all requests on the local network will not use the proxy server.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Checkbox"
+      }
+    },
+    {
+      "Id": "186f0c90-a2f9-4f69-be43-327f756ff1d0",
+      "Name": "DuoProxyUseDefaultCredentials",
+      "Label": "Proxy Use Default Credentials",
+      "HelpText": "If checked this will use the default Windows credentials when connecting to the proxy server.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Checkbox"
+      }
+    },
+    {
+      "Id": "a1e05421-d66b-49c3-a7e9-4559070b8a6f",
+      "Name": "DuoProxyUsername",
+      "Label": "Proxy Username",
+      "HelpText": "The username used to authenticate to the proxy server if required.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "SingleLineText"
+      }
+    },
+    {
+      "Id": "2e5f8f85-b1c6-4b07-b5fe-4bc5b7642d00",
+      "Name": "DuoProxyPassword",
+      "Label": "Proxy Password",
+      "HelpText": "The password used to authenticate to the proxy server if required. This password should be in plain text.\n\nUse either the proxy password field or the proxy password encrypted field.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Sensitive"
+      }
+    },
+    {
+      "Id": "4abcd2f4-a7f4-4f35-99f2-10bca5cfa441",
+      "Name": "DuoProxyPasswordEncrypted",
+      "Label": "Proxy Password Encrypted",
+      "HelpText": "A SecureString representation of the proxy password used to authenticate to the proxy server if required.\n\nUse either the proxy password field or the proxy password encrypted field.",
+      "DefaultValue": null,
+      "DisplaySettings": {
+        "Octopus.ControlType": "Sensitive"
+      }
+    }
+  ],
+  "$Meta": {
+    "ExportedAt": "2017-04-13T17:10:59.885Z",
+    "OctopusVersion": "3.4.11",
+    "Type": "ActionTemplate"
+  }
+}
